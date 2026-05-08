@@ -15,6 +15,9 @@ const COLUMN_ALIASES: Record<string, string[]> = {
   "model number": [
     "model number", "model", "model no.", "model no",
     "part number", "part no.", "part no",
+    "order number", "order no.", "order no",
+    "catalog number", "catalogue number", "cat. no.", "cat no",
+    "type number", "type no.",
   ],
   "qty": ["qty", "quantity", "qnty"],
 };
