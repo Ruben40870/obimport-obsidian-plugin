@@ -1,7 +1,7 @@
 {
   "id": "obimport",
   "name": "OBImport",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "minAppVersion": "1.4.0",
   "description": "Import AutoCAD BOM CSV files into Obsidian as a project note plus per-component notes.",
   "author": "Ruben Triegaardt",
