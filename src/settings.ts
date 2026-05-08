@@ -1,5 +1,6 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type OBImportPlugin from "./main";
+import { runMigrations } from "./migrate";
 
 export interface OBImportSettings {
   projectsFolder: string;
@@ -75,6 +76,42 @@ export class OBImportSettingTab extends PluginSettingTab {
         t.setValue(this.plugin.settings.overwriteProject).onChange(async (v) => {
           this.plugin.settings.overwriteProject = v;
           await this.plugin.saveSettings();
+        })
+      );
+
+    containerEl.createEl("h2", { text: "Template migrations" });
+    containerEl.createEl("p", {
+      cls: "setting-item-description",
+      text: "Sync existing project + component notes to the current template. " +
+            "Adds missing frontmatter keys with empty defaults, removes deprecated keys " +
+            "(category, cad_block, etc.), and forces constants such as type capitalization. " +
+            "Note bodies are never touched. Idempotent — safe to re-run.",
+    });
+
+    new Setting(containerEl)
+      .setName("Run template migrations")
+      .setDesc("Scan Projects and Components folders and update existing notes.")
+      .addButton((b) =>
+        b.setButtonText("Run").setCta().onClick(async () => {
+          b.setDisabled(true);
+          b.setButtonText("Running…");
+          try {
+            const stats = await runMigrations(this.app, this.plugin.settings);
+            const errPart = stats.errors.length > 0
+              ? `, ${stats.errors.length} error(s) (see console)`
+              : "";
+            new Notice(
+              `OBImport migrations: scanned ${stats.scanned}, updated ${stats.changed}${errPart}.`,
+            );
+            if (stats.errors.length > 0) {
+              console.error("OBImport migration errors:", stats.errors);
+            }
+          } catch (e) {
+            new Notice(`OBImport migrations failed: ${e instanceof Error ? e.message : String(e)}`);
+          } finally {
+            b.setDisabled(false);
+            b.setButtonText("Run");
+          }
         })
       );
   }

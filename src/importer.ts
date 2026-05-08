@@ -20,7 +20,7 @@ function markdownCell(value: string): string {
 function buildComponentNote(brand: string, modelNumber: string, description: string) {
   const name = componentNoteName(brand, modelNumber);
   const content = `---
-type: component
+type: Component
 manufacturer: ${yamlValue(brand)}
 part_number: ${yamlValue(modelNumber)}
 model_number: ${yamlValue(modelNumber)}
@@ -66,7 +66,7 @@ function buildProjectNote(
   const table = lines.join("\n");
 
   return `---
-type: project
+type: Project
 project_number: ${yamlValue(projectNumber)}
 client: ${yamlValue(client)}
 drawing: ${yamlValue(drawing)}
