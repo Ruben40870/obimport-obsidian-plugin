@@ -1,0 +1,24 @@
+.obimport-modal h2 { margin-top: 0; }
+.obimport-hint {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  margin: -0.5em 0 0.5em 0;
+  padding-left: 0;
+  min-height: 1em;
+}
+.obimport-filename {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  margin: 0 0 0.5em 0;
+}
+.obimport-error {
+  color: var(--text-error);
+  margin-top: 0.5em;
+  min-height: 1em;
+}
+.obimport-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5em;
+  margin-top: 1em;
+}
