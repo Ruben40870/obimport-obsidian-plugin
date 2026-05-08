@@ -9,8 +9,7 @@ export class ImportModal extends Modal {
   projectNumber = "";
   panelTag = "";
   client = "";
-  csvData: ArrayBuffer | null = null;
-  csvName = "";
+  csvFiles: Array<{ name: string; data: ArrayBuffer }> = [];
 
   private drawingHintEl!: HTMLElement;
   private fileNameEl!: HTMLElement;
@@ -64,14 +63,15 @@ export class ImportModal extends Modal {
       );
 
     const fileInput = contentEl.createEl("input", {
-      attr: { type: "file", accept: ".csv,text/csv" },
+      attr: { type: "file", accept: ".csv,text/csv", multiple: "true" },
     }) as HTMLInputElement;
     fileInput.style.display = "none";
 
     new Setting(contentEl)
-      .setName("BOM CSV file")
+      .setName("BOM CSV file(s)")
+      .setDesc("Pick one or more CSVs. Multiple files are concatenated in pick order; rows renumbered globally.")
       .addButton((b) =>
-        b.setButtonText("Choose file…").onClick(() => fileInput.click())
+        b.setButtonText("Choose file(s)…").onClick(() => fileInput.click())
       );
 
     this.fileNameEl = contentEl.createEl("div", {
@@ -80,16 +80,20 @@ export class ImportModal extends Modal {
     });
 
     fileInput.addEventListener("change", async () => {
-      const f = fileInput.files?.[0] ?? null;
-      if (!f) {
-        this.csvData = null;
-        this.csvName = "";
+      const files = Array.from(fileInput.files ?? []);
+      if (files.length === 0) {
+        this.csvFiles = [];
         this.fileNameEl.setText("No file chosen");
         return;
       }
-      this.csvName = f.name;
-      this.csvData = await f.arrayBuffer();
-      this.fileNameEl.setText(f.name);
+      this.csvFiles = await Promise.all(
+        files.map(async (f) => ({ name: f.name, data: await f.arrayBuffer() })),
+      );
+      this.fileNameEl.setText(
+        this.csvFiles.length === 1
+          ? this.csvFiles[0].name
+          : `${this.csvFiles.length} files: ${this.csvFiles.map((f) => f.name).join(", ")}`,
+      );
     });
 
     this.errorEl = contentEl.createEl("div", { cls: "obimport-error" });
@@ -122,29 +126,47 @@ export class ImportModal extends Modal {
       this.errorEl.setText("Panel tag is required.");
       return;
     }
-    if (!this.csvData) {
-      this.errorEl.setText("CSV file is required.");
+    if (this.csvFiles.length === 0) {
+      this.errorEl.setText("At least one CSV file is required.");
       return;
     }
     this.submitBtn.disabled = true;
     try {
-      const rows = parseBom(this.csvData);
-      if (rows.length === 0) {
-        throw new Error(
-          "No BOM rows found (CSV had a header but no data rows with a Model Number)."
-        );
+      const allRows = [];
+      const failed: string[] = [];
+      for (const f of this.csvFiles) {
+        try {
+          const rows = parseBom(f.data);
+          if (rows.length === 0) {
+            failed.push(`${f.name}: no data rows`);
+            continue;
+          }
+          allRows.push(...rows);
+        } catch (e) {
+          failed.push(`${f.name}: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
+      if (failed.length > 0) {
+        throw new Error(`Parse failed for ${failed.length} file(s):\n${failed.join("\n")}`);
+      }
+      if (allRows.length === 0) {
+        throw new Error("No BOM rows found across the selected file(s).");
+      }
+      // Renumber sequentially across all files so the merged BOM reads as one table.
+      allRows.forEach((r, i) => { r.nr = i + 1; });
+
+      const sourceLabel = this.csvFiles.map((f) => f.name).join(", ");
       const result = await runImport(
         this.app,
         this.plugin.settings,
         this.projectNumber,
         this.panelTag,
         this.client,
-        rows,
-        this.csvName,
+        allRows,
+        sourceLabel,
       );
       new Notice(
-        `OBImport: ${result.rowCount} rows. ` +
+        `OBImport: ${result.rowCount} rows from ${this.csvFiles.length} file(s). ` +
         `Components: +${result.componentsCreated} new, ${result.componentsSkipped} kept. ` +
         `Drawing: ${result.drawing}.`
       );

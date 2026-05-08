@@ -1,6 +1,6 @@
 {
   "name": "obimport",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Obsidian plugin: import AutoCAD BOM CSV files as project + component notes.",
   "main": "main.js",
   "scripts": {
