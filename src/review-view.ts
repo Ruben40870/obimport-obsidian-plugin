@@ -148,6 +148,11 @@ export class ReviewView extends ItemView {
       a.setAttr("target", "_blank");
       a.setAttr("rel", "noopener");
     }
+    if (entry.imageUrl) {
+      const a = links.createEl("a", { href: entry.imageUrl, text: "image" });
+      a.setAttr("target", "_blank");
+      a.setAttr("rel", "noopener");
+    }
 
     const actions = row.createDiv({ cls: "obimport-review-row-actions" });
     const approveBtn = actions.createEl("button", { text: "Approve", cls: "mod-cta" });

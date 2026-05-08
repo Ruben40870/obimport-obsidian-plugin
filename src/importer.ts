@@ -31,12 +31,6 @@ supplier_link: ""
 
 # ${name}
 
-## Description
-
-${description}
-
-## Datasheet
-
 ## Notes
 
 ## Used in projects

@@ -1,4 +1,4 @@
-import { App, Notice, TFile, TFolder, normalizePath, parseYaml, stringifyYaml } from "obsidian";
+import { App, Notice, TFile, TFolder, normalizePath, parseYaml, requestUrl, stringifyYaml } from "obsidian";
 import { chat, verifyUrl } from "./openrouter";
 import type { OBImportSettings } from "./settings";
 import { cleanFilename, cleanText, componentNoteName } from "./parser";
@@ -14,6 +14,7 @@ export interface EnrichmentJson {
   description: string | null;
   datasheet_url: string | null;
   supplier_link: string | null;
+  image_url: string | null;
   notes: string | null;
 }
 
@@ -59,6 +60,7 @@ function buildPrompt(input: ComponentInput): { system: string; user: string } {
     "  - Keep model numbers, units, sizes, voltages exactly as written.",
     "Step 3. Find the official manufacturer datasheet URL (PDF preferred, on the manufacturer's domain).",
     "Step 4. Find a 'where to buy' or supplier product page from the manufacturer's site. Prefer Dutch suppliers; otherwise EU.",
+    "Step 5. Find a direct URL to the main product image (.png / .jpg / .jpeg / .webp). Must point to an image file, not an HTML page. Avoid logos, banners, search-result thumbnails.",
     "",
     "Use web search. Do not invent URLs. If a field cannot be confirmed, set it to null.",
     "",
@@ -67,6 +69,7 @@ function buildPrompt(input: ComponentInput): { system: string; user: string } {
   "description": "<string or null, ≤ 200 chars, English>",
   "datasheet_url": "<string URL or null>",
   "supplier_link": "<string URL or null>",
+  "image_url": "<string URL to image file or null>",
   "notes": "<string or null, e.g. 'datasheet behind login'>"
 }`,
   ].join("\n");
@@ -118,12 +121,13 @@ function normaliseEnrichment(obj: Record<string, unknown>): EnrichmentJson {
     description: str(obj.description),
     datasheet_url: str(obj.datasheet_url ?? obj.datasheet),
     supplier_link: str(obj.supplier_link ?? obj.supplier ?? obj.supplier_url),
+    image_url: str(obj.image_url ?? obj.image ?? obj.image_link),
     notes: str(obj.notes),
   };
 }
 
 function isAllBlank(e: EnrichmentJson): boolean {
-  return !e.description && !e.datasheet_url && !e.supplier_link;
+  return !e.description && !e.datasheet_url && !e.supplier_link && !e.image_url;
 }
 
 function readFrontmatter(content: string): { data: Record<string, unknown>; body: string; hasFrontmatter: boolean } {
@@ -198,6 +202,7 @@ function buildPendingFile(
   merged._proposed_at = new Date().toISOString();
   merged._model = meta.model;
   merged._source = meta.sourcePath;
+  if (enrichment.image_url) merged._image_url = enrichment.image_url;
   if (meta.unverifiedDatasheet) merged._unverified_datasheet = true;
   if (meta.notes) merged._notes = meta.notes;
 
@@ -330,7 +335,7 @@ export class EnrichService {
     }
 
     const eff: EnrichmentJson = enrichment ?? {
-      description: null, datasheet_url: null, supplier_link: null, notes: null,
+      description: null, datasheet_url: null, supplier_link: null, image_url: null, notes: null,
     };
 
     let unverified = false;
@@ -372,7 +377,7 @@ function sleep(ms: number): Promise<void> {
 // Approve / reject
 // ============================================================================
 
-const PENDING_META_FIELDS = ["_status", "_proposed_at", "_model", "_source", "_unverified_datasheet", "_notes"];
+const PENDING_META_FIELDS = ["_status", "_proposed_at", "_model", "_source", "_image_url", "_unverified_datasheet", "_notes"];
 
 export async function approvePending(app: App, settings: OBImportSettings, pendingFile: TFile): Promise<void> {
   const pendingContent = await app.vault.read(pendingFile);
@@ -402,7 +407,23 @@ export async function approvePending(app: App, settings: OBImportSettings, pendi
   // Drop pending metadata if it accidentally landed.
   for (const f of PENDING_META_FIELDS) delete merged[f];
 
-  const newContent = writeFrontmatter(merged, sourceParsed.body);
+  // Body cleanup: strip legacy "## Description" + "## Datasheet" sections.
+  let body = stripLegacyBodySections(sourceParsed.body);
+
+  // Image: download + embed between H1 and the next heading.
+  const imageUrl = typeof pendingData._image_url === "string" ? pendingData._image_url : null;
+  if (imageUrl) {
+    try {
+      const manufacturer = String(merged.manufacturer ?? "");
+      const modelNumber = String(merged.model_number ?? merged.part_number ?? "");
+      const fileName = await downloadImage(app, manufacturer, modelNumber, imageUrl);
+      body = insertImageEmbed(body, fileName);
+    } catch (e) {
+      new Notice(`OBImport: image download failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  const newContent = writeFrontmatter(merged, body);
   await app.vault.modify(sourceFile, newContent);
 
   if (settings.downloadPdfDatasheets) {
@@ -419,6 +440,77 @@ export async function approvePending(app: App, settings: OBImportSettings, pendi
   await app.vault.delete(pendingFile);
 }
 
+function stripLegacyBodySections(body: string): string {
+  let out = body;
+  // Remove "## Description" block (heading + content) up to next heading or EOF.
+  out = out.replace(/(^|\n)##\s+Description[ \t]*\r?\n[\s\S]*?(?=\n##\s|\n#\s|$)/g, "$1");
+  // Remove "## Datasheet" block similarly.
+  out = out.replace(/(^|\n)##\s+Datasheet[ \t]*\r?\n[\s\S]*?(?=\n##\s|\n#\s|$)/g, "$1");
+  // Collapse runs of 3+ newlines down to 2.
+  out = out.replace(/\n{3,}/g, "\n\n");
+  return out;
+}
+
+function insertImageEmbed(body: string, fileName: string): string {
+  const embed = `![[${fileName}]]`;
+  if (body.includes(embed)) return body;
+  const m = body.match(/^(#\s[^\n]*\n)/m);
+  if (!m || m.index == null) {
+    return `${embed}\n\n${body}`;
+  }
+  const insertAt = m.index + m[0].length;
+  const before = body.slice(0, insertAt);
+  const after = body.slice(insertAt);
+  // Ensure exactly one blank line on each side.
+  const leadingTrim = after.replace(/^\n+/, "");
+  return `${before}\n${embed}\n\n${leadingTrim}`;
+}
+
+function imageExtFromContentType(ct: string): string | null {
+  const t = ct.toLowerCase();
+  if (t.includes("png")) return "png";
+  if (t.includes("webp")) return "webp";
+  if (t.includes("svg")) return "svg";
+  if (t.includes("gif")) return "gif";
+  if (t.includes("jpeg") || t.includes("jpg")) return "jpg";
+  return null;
+}
+
+function imageExtFromUrl(url: string): string | null {
+  const m = url.match(/\.(png|jpg|jpeg|gif|webp|svg)(?:[?#]|$)/i);
+  return m ? m[1].toLowerCase().replace("jpeg", "jpg") : null;
+}
+
+async function downloadImage(
+  app: App,
+  manufacturer: string,
+  modelNumber: string,
+  url: string,
+): Promise<string> {
+  const res = await requestUrl({ url, method: "GET", throw: false });
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  const ct = String(res.headers["content-type"] ?? res.headers["Content-Type"] ?? "");
+  if (ct && !ct.toLowerCase().startsWith("image/")) {
+    throw new Error(`URL did not return an image (content-type: ${ct})`);
+  }
+  const ext = imageExtFromContentType(ct) ?? imageExtFromUrl(url) ?? "jpg";
+  const brand = cleanFilename(manufacturer || "Unknown Brand");
+  const folder = `Images/${brand}`;
+  await ensureFolder(app, folder);
+  const baseName = componentNoteName(manufacturer, modelNumber);
+  const fileName = `${baseName}.${ext}`;
+  const path = normalizePath(`${folder}/${fileName}`);
+  const existing = app.vault.getAbstractFileByPath(path);
+  if (existing instanceof TFile) {
+    await app.vault.modifyBinary(existing, res.arrayBuffer);
+  } else {
+    await app.vault.createBinary(path, res.arrayBuffer);
+  }
+  return fileName;
+}
+
 export async function rejectPending(app: App, pendingFile: TFile): Promise<void> {
   await app.vault.delete(pendingFile);
 }
@@ -430,7 +522,6 @@ async function downloadAndEmbedPdf(
   frontmatter: Record<string, unknown>,
   url: string,
 ): Promise<void> {
-  const { requestUrl } = await import("obsidian");
   const res = await requestUrl({ url, method: "GET", throw: false });
   if (res.status < 200 || res.status >= 300) {
     throw new Error(`HTTP ${res.status}`);
@@ -474,6 +565,7 @@ export interface PendingEntry {
   description: string;
   datasheet: string;
   supplierLink: string;
+  imageUrl: string;
   sourcePath: string;
 }
 
@@ -506,6 +598,7 @@ export async function readPendingEntry(app: App, file: TFile): Promise<PendingEn
     description: String(data.description ?? ""),
     datasheet: String(data.datasheet ?? ""),
     supplierLink: String(data.supplier_link ?? ""),
+    imageUrl: typeof data._image_url === "string" ? data._image_url : "",
     sourcePath: typeof data._source === "string" ? data._source : "",
   };
 }
