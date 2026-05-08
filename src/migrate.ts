@@ -18,6 +18,7 @@ const COMPONENT_FIELDS: FieldSpec[] = [
 const PROJECT_FIELDS: FieldSpec[] = [
   { name: "type", kind: "constant", value: "Project" },
   { name: "project_number", kind: "user", default: "" },
+  { name: "panel_tag", kind: "user", default: "" },
   { name: "client", kind: "user", default: "" },
   { name: "drawing", kind: "user", default: "" },
   { name: "source_bom", kind: "user", default: "" },

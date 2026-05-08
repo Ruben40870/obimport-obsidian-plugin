@@ -36,10 +36,10 @@ supplier_link: ""
 ## Used in projects
 
 \`\`\`dataview
-TABLE project_number, drawing
+TABLE project_number, panel_tag, drawing
 FROM "Projects"
 WHERE contains(file.outlinks, this.file.link)
-SORT project_number ASC
+SORT project_number ASC, panel_tag ASC
 \`\`\`
 `;
   return { name, content };
@@ -47,6 +47,7 @@ SORT project_number ASC
 
 function buildProjectNote(
   projectNumber: string,
+  panelTag: string,
   client: string,
   drawing: string,
   sourceCsvName: string,
@@ -68,12 +69,15 @@ function buildProjectNote(
   return `---
 type: Project
 project_number: ${yamlValue(projectNumber)}
+panel_tag: ${yamlValue(panelTag)}
 client: ${yamlValue(client)}
 drawing: ${yamlValue(drawing)}
 source_bom: ${yamlValue(sourceCsvName)}
 ---
 
-# ${projectNumber}
+# ${panelTag}
+
+Project: ${projectNumber}
 
 ## BOM
 
@@ -131,12 +135,15 @@ export async function runImport(
   app: App,
   settings: OBImportSettings,
   projectNumber: string,
+  panelTag: string,
   client: string,
   rows: BomRow[],
   csvFilename: string,
 ): Promise<ImportResult> {
   const pn = cleanText(projectNumber);
   if (!pn) throw new Error("Project number is required.");
+  const panel = cleanText(panelTag);
+  if (!panel) throw new Error("Panel tag is required.");
   const drawing = deriveDrawingNumber(pn);
 
   const projectsFolder = stripSlashes(settings.projectsFolder) || "Projects";
@@ -160,9 +167,11 @@ export async function runImport(
     created++;
   }
 
-  const projectFileName = `${cleanFilename(pn)}.md`;
-  const projectPath = `${projectsFolder}/${projectFileName}`;
-  const projectContent = buildProjectNote(pn, client, drawing, csvFilename, rows);
+  const projectFolder = `${projectsFolder}/${cleanFilename(pn)}`;
+  await ensureFolder(app.vault, projectFolder);
+  const projectFileName = `${cleanFilename(panel)}.md`;
+  const projectPath = `${projectFolder}/${projectFileName}`;
+  const projectContent = buildProjectNote(pn, panel, client, drawing, csvFilename, rows);
   const file = await writeProjectFile(app.vault, projectPath, projectContent, settings.overwriteProject);
 
   return {

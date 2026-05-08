@@ -7,6 +7,7 @@ export class ImportModal extends Modal {
   plugin: OBImportPlugin;
 
   projectNumber = "";
+  panelTag = "";
   client = "";
   csvData: ArrayBuffer | null = null;
   csvName = "";
@@ -42,6 +43,17 @@ export class ImportModal extends Modal {
       );
 
     this.drawingHintEl = contentEl.createEl("div", { cls: "obimport-hint" });
+
+    new Setting(contentEl)
+      .setName("Panel tag")
+      .setDesc("Used as the project note filename. Project note path: <Projects>/<project number>/<panel tag>.md.")
+      .addText((t) =>
+        t.setPlaceholder("UCP-001")
+          .setValue(this.panelTag)
+          .onChange((v) => {
+            this.panelTag = v.trim();
+          })
+      );
 
     new Setting(contentEl)
       .setName("Client (optional)")
@@ -106,6 +118,10 @@ export class ImportModal extends Modal {
       this.errorEl.setText("Project number is required.");
       return;
     }
+    if (!this.panelTag) {
+      this.errorEl.setText("Panel tag is required.");
+      return;
+    }
     if (!this.csvData) {
       this.errorEl.setText("CSV file is required.");
       return;
@@ -122,6 +138,7 @@ export class ImportModal extends Modal {
         this.app,
         this.plugin.settings,
         this.projectNumber,
+        this.panelTag,
         this.client,
         rows,
         this.csvName,
