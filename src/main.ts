@@ -20,6 +20,11 @@ export default class OBImportPlugin extends Plugin {
       new ImportModal(this.app, this).open();
     });
 
+    // Review panel
+    this.addRibbonIcon("wand-2", "OBImport: Open Review panel", () => {
+      void this.activateReviewView();
+    });
+
     this.addCommand({
       id: "open-import-modal",
       name: "Import BOM CSV",
