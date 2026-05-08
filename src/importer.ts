@@ -25,10 +25,8 @@ manufacturer: ${yamlValue(brand)}
 part_number: ${yamlValue(modelNumber)}
 model_number: ${yamlValue(modelNumber)}
 description: ${yamlValue(description)}
-category: ""
 datasheet: ""
 supplier_link: ""
-cad_block: ""
 ---
 
 # ${name}
