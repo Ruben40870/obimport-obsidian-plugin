@@ -7,22 +7,20 @@ export interface BomRow {
   qty: number;
 }
 
-const COLUMN_ALIASES: Record<string, string[]> = {
-  "nr.": ["nr.", "nr", "no.", "no", "item", "item no.", "item no", "#"],
-  "description": ["description", "desc"],
-  "tag number": ["tag number", "tag", "tag no.", "tag no"],
-  "brand": ["brand", "make", "manufacturer", "mfr"],
-  "model number": [
-    "model number", "model", "model no.", "model no",
-    "part number", "part no.", "part no",
-    "order number", "order no.", "order no",
-    "catalog number", "catalogue number", "cat. no.", "cat no",
-    "type number", "type no.",
-  ],
-  "qty": ["qty", "quantity", "qnty"],
+// Keyword-regex matcher — handles arbitrary header phrasings without hard-coded
+// alias lists. Each canonical column matches any header containing one of its
+// keyword stems; ambiguous overlaps (e.g. "Tag Number" hits both `tag` and
+// `number`) are resolved by the backtracking assignment in findHeader().
+const KEYWORDS: Record<string, RegExp> = {
+  "nr.": /\b(nr|no|num|number|item|pos|line|seq)\b|#/i,
+  "description": /\b(desc|description|name|designation|denomination|beschreib\w*|omschrijv\w*)\b/i,
+  "tag number": /\b(tag|label)\b/i,
+  "brand": /\b(brand|make|manuf\w*|mfr|mfg|vendor|supplier|fabricant|hersteller|merk|marca|marque)\b/i,
+  "model number": /\b(model|part|order|catalog|catalogue|cat|type|article|articolo|ref|sku|code|bestell\w*|onderdeel\w*|numero)\b/i,
+  "qty": /\b(qty|quantity|qnty|qnt|amount|pcs|pieces|count|anzahl|aantal|quantità|cantidad|nombre)\b/i,
 };
 
-const REQUIRED = Object.keys(COLUMN_ALIASES);
+const REQUIRED = Object.keys(KEYWORDS);
 
 export function cleanText(value: unknown): string {
   if (value == null) return "";
@@ -110,18 +108,53 @@ function parseCsv(text: string, delim: string): string[][] {
   return rows;
 }
 
+function bestMatchLen(text: string, re: RegExp): number {
+  const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+  let best = 0;
+  for (const m of text.matchAll(g)) {
+    if (m[0].length > best) best = m[0].length;
+  }
+  return best;
+}
+
 function findHeader(rows: string[][]): { index: number; mapping: Record<string, number> } | null {
   for (let i = 0; i < rows.length; i++) {
-    const norm = rows[i].map((c) => cleanText(c).toLowerCase());
-    const mapping: Record<string, number> = {};
-    let ok = true;
-    for (const canonical of REQUIRED) {
-      const aliases = COLUMN_ALIASES[canonical];
-      const idx = norm.findIndex((n) => aliases.includes(n));
-      if (idx === -1) { ok = false; break; }
-      mapping[canonical] = idx;
+    const headers = rows[i].map((c) => cleanText(c).toLowerCase());
+
+    // Build candidate header indices per canonical, sorted by match strength.
+    const candidates: Record<string, Array<{ idx: number; score: number }>> = {};
+    for (const c of REQUIRED) {
+      const list: Array<{ idx: number; score: number }> = [];
+      for (let j = 0; j < headers.length; j++) {
+        const score = bestMatchLen(headers[j], KEYWORDS[c]);
+        if (score > 0) list.push({ idx: j, score });
+      }
+      list.sort((a, b) => b.score - a.score);
+      candidates[c] = list;
     }
-    if (ok) return { index: i, mapping };
+    if (REQUIRED.some((c) => candidates[c].length === 0)) continue;
+
+    // Backtracking assignment, rarest canonicals first to avoid getting stuck.
+    const order = [...REQUIRED].sort(
+      (a, b) => candidates[a].length - candidates[b].length,
+    );
+    const mapping: Record<string, number> = {};
+    const used = new Set<number>();
+    const solve = (k: number): boolean => {
+      if (k === order.length) return true;
+      const c = order[k];
+      for (const cand of candidates[c]) {
+        if (used.has(cand.idx)) continue;
+        mapping[c] = cand.idx;
+        used.add(cand.idx);
+        if (solve(k + 1)) return true;
+        used.delete(cand.idx);
+        delete mapping[c];
+      }
+      return false;
+    };
+
+    if (solve(0)) return { index: i, mapping };
   }
   return null;
 }
