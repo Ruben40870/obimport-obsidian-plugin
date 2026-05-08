@@ -31,7 +31,7 @@ export class ImportModal extends Modal {
 
     new Setting(contentEl)
       .setName("Project number")
-      .setDesc("Example: 23320-GEN. Drawing number is derived automatically.")
+      .setDesc("Example: 23320-GEN, 23320-COM, 9380-SU. Drawing number = leading digits + -07.")
       .addText((t) =>
         t.setPlaceholder("23320-GEN")
           .setValue(this.projectNumber)

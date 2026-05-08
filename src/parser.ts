@@ -38,7 +38,8 @@ export function cleanFilename(value: string): string {
 
 export function deriveDrawingNumber(projectNumber: string): string {
   const pn = cleanText(projectNumber);
-  if (pn.toUpperCase().endsWith("-GEN")) return pn.slice(0, -4) + "-07";
+  const m = pn.match(/^(\d+)/);
+  if (m) return `${m[1]}-07`;
   return pn;
 }
 
